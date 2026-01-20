@@ -1,0 +1,31 @@
+[project]
+name = "fake-news-detection"
+version = "0.1.0"
+description = "Fake News Detection using Large Language Models"
+authors = [
+    {name = "Sarwar Saif"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy (>=1.26.0,<2.0.0)",
+    "tqdm (>=4.66.0,<5.0.0)",
+    "pandas (>=2.1.0,<3.0.0)",
+    "urllib3 (>=2.0.0,<3.0.0)",
+    "torch (>=2.0.0,<3.0.0)",
+    "torchvision (>=0.15.0,<1.0.0)",
+    "wandb (>=0.16.0,<1.0.0)",
+    "matplotlib (>=3.8.0,<4.0.0)",
+    "scikit-learn (>=1.3.0,<2.0.0)",
+    "transformers (>=4.35.0,<5.0.0)",
+    "jsonlines (>=4.0.0,<5.0.0)",
+    "python-dotenv (>=1.0.0,<2.0.0)",
+    "ruff (>=0.1.0,<1.0.0)",
+    "pytest (>=7.4.0,<8.0.0)",
+    "pyyaml (>=6.0.0,<7.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,9 @@
+# configs/liar_binary.yaml
+dataset_name: "LIAR-PLUS"
+data_path: "./data/processed/liar"
+mode: "binary"
+gq_file: "results_from_cognition_system.json"
+sq_file: "decomposed_statements.json"
+evo_flag: false
+evo_file: null
+# ... other model hyperparameters
