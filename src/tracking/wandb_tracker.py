@@ -1,8 +1,5 @@
-# src/tracking/wandb_tracker.py
 import wandb
 from .base_tracker import BaseTracker
-
-# src/tracking/wandb_tracker.py
 
 class WandbTracker(BaseTracker):
     def __init__(self, project, run_name=None, config=None, group=None):
@@ -11,7 +8,7 @@ class WandbTracker(BaseTracker):
         self.config = config or {}
         self.group = group
         self.run = None
-        # Initialize a persistent table
+        # Persistent table to be logged at the end
         self.prediction_table = wandb.Table(
             columns=[
                 "sample_id", "text", "subjectivity", 
@@ -27,11 +24,17 @@ class WandbTracker(BaseTracker):
             group=self.group
         )
 
+    # THIS WAS THE MISSING PIECE
+    def log(self, metrics: dict, step: int = None):
+        """Standard logging for metrics like loss and accuracy."""
+        if self.run:
+            wandb.log(metrics, step=step)
+
     def log_llm_interaction(self, sample_id, text, features, verdict, label):
-        """Adds a row to the persistent table."""
+        """Adds a row to the persistent table for qualitative analysis."""
         self.prediction_table.add_data(
             sample_id,
-            text[:500],        # Text
+            text[:500] if text else "",
             features[0],       # Subjectivity
             features[1],       # Reasoning
             features[2],       # CLIP Similarity
@@ -40,7 +43,9 @@ class WandbTracker(BaseTracker):
         )
 
     def finish(self):
-        # Log the completed table at the very end
+        """Uploads the table and closes the run."""
         if self.run:
-            wandb.log({"evaluation_results": self.prediction_table})
+            # Only log the table if it has data
+            if len(self.prediction_table.data) > 0:
+                wandb.log({"evaluation_results": self.prediction_table})
             wandb.finish()
