@@ -21,46 +21,54 @@ from src.tracking import set_tracker, init, log, finish
 from src.tracking.wandb_tracker import WandbTracker
 
 # --- DIRECTORY CONFIG ---
-# Corrected based on your specific Google Drive structure
 BASE_DIR = "/content/drive/MyDrive/Study/MBA-IB/Research/fake_news_detection"
-DATA_ROOT = os.path.join(BASE_DIR, "data/MMFakeBench2")
-ANN_PATH = os.path.join(DATA_ROOT, "MMFakeBench_test.json") 
-IMAGE_ROOT = os.path.join(DATA_ROOT, "MMFakeBench_test") 
-
+DATA_DIR = os.path.join(BASE_DIR, "data/MMFakeBench/MMFakeBench_val") # Adjust if subfolders differ
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 MODEL_SAVE_DIR = os.path.join(BASE_DIR, "models")
-
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-BATCH_SIZE = 1 
-
-# --------------------------
-# Path Validation
-# --------------------------
-def validate_paths():
-    print("--- Validating Paths ---")
-    critical_paths = [ANN_PATH, IMAGE_ROOT]
-    for p in critical_paths:
-        if not os.path.exists(p):
-            raise FileNotFoundError(f"CRITICAL PATH MISSING: {p}")
-    print("✅ All paths verified.")
+BATCH_SIZE = 1 # Recommended for Gemma-2-9B on Colab T4
 
 # --------------------------
 # Stage 1: Subjectivity (DeBERTa)
 # --------------------------
+from huggingface_hub import hf_hub_download
+from transformers import DebertaV2Tokenizer, AutoModelForSequenceClassification
+
 class SubjectivityAnalyzer:
     def __init__(self):
+        # We use the fine-tuned weights for the model, 
+        # but the base Microsoft repo for the tokenizer file.
         model_weights = "MatteoFasulo/mdeberta-v3-base-subjectivity-english"
         tokenizer_base = "microsoft/mdeberta-v3-base"
         
         print(f"--- Stage 1: Loading {model_weights} ---")
-        # Fix for EntryNotFoundError: Download from official MS repo
-        vocab_path = hf_hub_download(repo_id=tokenizer_base, filename="spm.model", cache_dir=MODEL_SAVE_DIR)
-        self.tokenizer = DebertaV2Tokenizer.from_pretrained(tokenizer_base, vocab_file=vocab_path, use_fast=False)
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_weights, cache_dir=MODEL_SAVE_DIR).to(DEVICE).eval()
         
+        try:
+            # Download spm.model from the official Microsoft repo
+            vocab_path = hf_hub_download(
+                repo_id=tokenizer_base, 
+                filename="spm.model", 
+                cache_dir=MODEL_SAVE_DIR
+            )
+            
+            self.tokenizer = DebertaV2Tokenizer.from_pretrained(
+                tokenizer_base, 
+                vocab_file=vocab_path, 
+                use_fast=False
+            )
+        except Exception as e:
+            print(f"⚠️ Tokenizer load failed: {e}. Falling back to default...")
+            # Fallback: using the base tokenizer name often works as a secondary check
+            self.tokenizer = DebertaV2Tokenizer.from_pretrained(tokenizer_base, use_fast=False)
+            
+        self.model = AutoModelForSequenceClassification.from_pretrained(
+            model_weights,
+            cache_dir=MODEL_SAVE_DIR
+        ).to(DEVICE).eval()
+    
     def get_score(self, texts):
         inputs = self.tokenizer(texts, return_tensors="pt", padding=True, truncation=True, max_length=512).to(DEVICE)
         with torch.no_grad():
@@ -100,15 +108,8 @@ class CLIPLoraEncoder:
         self.model = get_peft_model(base_model, config).to(DEVICE).eval()
 
     def get_similarity(self, image_paths, texts):
-        processed_images = []
-        for p in image_paths:
-            try:
-                processed_images.append(Image.open(p).convert("RGB"))
-            except Exception as e:
-                print(f"⚠️ Error loading image {p}: {e}")
-                processed_images.append(Image.new('RGB', (224, 224), color='gray'))
-
-        inputs = self.processor(text=texts, images=processed_images, return_tensors="pt", padding=True).to(DEVICE)
+        images = [Image.open(p).convert("RGB") for p in image_paths]
+        inputs = self.processor(text=texts, images=images, return_tensors="pt", padding=True).to(DEVICE)
         with torch.no_grad():
             out = self.model(**inputs)
             sim = torch.sum(out.image_embeds * out.text_embeds, dim=1)
@@ -118,8 +119,6 @@ class CLIPLoraEncoder:
 # Execution Logic
 # --------------------------
 def main():
-    validate_paths()
-    
     load_dotenv(os.path.join(BASE_DIR, ".env"))
     os.environ["WANDB_API_KEY"] = os.getenv("WANDB_API_KEY")
     
@@ -127,69 +126,40 @@ def main():
     set_tracker(tracker)
     init()
 
-    # Init Models with memory clearing between loads
+    # Init Models
     s1 = SubjectivityAnalyzer()
-    gc.collect(); torch.cuda.empty_cache()
-    
     s2 = SemanticReasoner()
-    gc.collect(); torch.cuda.empty_cache()
-    
     s3 = CLIPLoraEncoder()
-    gc.collect(); torch.cuda.empty_cache()
 
     # Load Data
-    dataset = MMFakeBenchDataset(json_path=ANN_PATH, root_dir=IMAGE_ROOT)
+    ann_path = os.path.join(BASE_DIR, "source/MMFakeBench_test.json")
+    dataset = MMFakeBenchDataset(json_path=ann_path, root_dir=DATA_DIR)
     loader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE)
 
-    output_file = os.path.join(OUTPUT_DIR, "extracted_features.json")
+    extracted_data = []
 
-    # Check if we already have progress
-    if os.path.exists(output_file):
-        with open(output_file, "r") as f:
-            extracted_data = json.load(f)
-        start_step = len(extracted_data)
-        print(f"⏩ Resuming from step {start_step}...")
-    else:
-        extracted_data = []
-        start_step = 0
-
-    print(f"--- Starting Extraction Loop on {DEVICE} ---")
     for step, batch in enumerate(tqdm(loader)):
-
-        # Skip steps we already processed
-        if step < start_step:
-            continue
         texts = batch["text"]
+        # Ensure image paths are absolute relative to GDrive
+        img_paths = [os.path.join(DATA_DIR, p.lstrip('/')) for p in batch["image_path"]]
         
-        # Since MMFakeBenchDataset already joined the root_dir, 
-        # the batch['image_path'] is already absolute.
-        img_paths = batch["image_path"] 
-        
-        try:
-            f1 = s1.get_score(texts)
-            f2 = s2.get_stance(texts)
-            f3 = s3.get_similarity(img_paths, texts)
+        f1 = s1.get_score(texts)
+        f2 = s2.get_stance(texts)
+        f3 = s3.get_similarity(img_paths, texts)
 
-            for i in range(len(texts)):
-                extracted_data.append({
-                    "id": batch.get("id", [f"sample_{step}_{i}"])[i],
-                    "features": [f1[i].item(), f2[i].item(), f3[i].item()],
-                    "label": 1 if batch["label"][i] == "Fake" else 0
-                })
-            # Save every 50 steps so you never lose more than a few minutes of work
-            if step % 50 == 0:
-                with open(output_file, "w") as f:
-                    json.dump(extracted_data, f)
+        for i in range(len(texts)):
+            extracted_data.append({
+                "id": batch.get("id", [step])[i],
+                "features": [f1[i].item(), f2[i].item(), f3[i].item()],
+                "label": 1 if batch["label"][i] == "Fake" else 0
+            })
 
-        except Exception as e:
-            print(f"⚠️ Skipping step {step} due to error: {e}")
-            continue
-
-        # Log periodically to WandB
-        if step % 10 == 0:
-            log({"processed_steps": step})
+    # Save output to GDrive 'outputs' folder
+    output_file = os.path.join(OUTPUT_DIR, "extracted_features.json")
+    with open(output_file, "w") as f:
+        json.dump(extracted_data, f)
     
-    print(f"✅ Success! Features saved to {output_file}")
+    print(f"Features saved to {output_file}")
     finish()
 
 if __name__ == "__main__":

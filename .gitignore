@@ -21,6 +21,8 @@ nohup.out
 wandb/
 unsloth_compiled_cache/
 # Data / outputs
+huggingface_tokenizers_cache/
+outputs/
 factcheck_output.json
 src/models/clip-vit-base-patch32/
 notebooks/

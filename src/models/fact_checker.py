@@ -150,40 +150,27 @@ def safe_parse_json(raw_text: str):
 # -----------------------
 # Fact-checking prompt
 # -----------------------
+# Updated FACTCHECK_PROMPT_TEMPLATE in fact_checker.py
 FACTCHECK_PROMPT_TEMPLATE = """
-You are an assistant that helps a forensic analyst verify claims. 
-You are provided: (1) an image (accessible by file path), and (2) an associated textual message.
+You are a forensic analyst using INTERNAL KNOWLEDGE and LOGIC. 
+Analyze the provided image and text headline.
 
-RULES:
-- Use BOTH the image+text evidence AND reliable, well-established world knowledge.
-- Clearly separate evidence sources:
-  * If support/contradiction comes from the image or text, reference those explicitly.
-  * If support/contradiction comes from general world knowledge, state that explicitly.
-- If neither the image, text, nor reliable world knowledge can settle the claim, return evaluation = "insufficient_evidence".
-- Do not hallucinate uncertain or speculative knowledge. Only use high-confidence, factual knowledge (e.g., geography, widely known institutions, major events).
-- Evidence must be short, explicit, and traceable to either "image", "text", or "world_knowledge".
+STEP-BY-STEP REASONING (CoT):
+1. IMAGE ANALYSIS: Identify people, locations, and timestamps visible in the image.
+2. TEXTUAL CLAIM: List specific factual assertions in the text.
+3. INTERNAL VERIFICATION: Compare claims against your internal world knowledge. 
+   - Is this event historically documented?
+   - Does the location match the visible landmarks?
+4. CONSISTENCY CHECK: Do the image and text represent the same event?
 
-Task: Produce a structured JSON object (parsable by machines) with these fields:
-
-1) image_description: concise summary of the visible content (objects, people, setting, any readable text). Max 200 words.
-2) extracted_claims: list of short factual claims explicitly asserted in the message text.
-3) claim_evaluations: list of objects, each with:
-   - claim: the extracted claim string
-   - evaluation: one of ["supports", "contradicts", "insufficient_evidence"]
-   - evidence: explanation with source labels ("image", "text", "world_knowledge")
-   - confidence: float 0.0–1.0
-4) forensic_checklist: list of short, actionable items for human verification 
-   (examples: "check EXIF/metadata", "reverse image search", "verify institutional location from trusted sources").
-5) final_verdict: one of ["likely_real", "likely_fake", "uncertain"].
-6) verdict_rationale: short rationale (max 200 words), explicitly distinguishing between image/text evidence and world knowledge.
-7) analysis_steps: numbered list of reasoning steps followed.
-
-CONSTRAINTS:
-- Output must be valid JSON ONLY, no extra commentary.
-- Be concise but precise.
-- Always mark which parts of the evidence come from: image, text, or world_knowledge.
-
-Now analyze the image and text provided and return the JSON.
+OUTPUT JSON:
+{
+  "reasoning_steps": ["step 1...", "step 2..."],
+  "subjectivity_score": 0.0-1.0,
+  "internal_stance": "SUPPORTED" | "REFUTED" | "UNVERIFIABLE",
+  "confidence": 0.0-1.0,
+  "final_verdict": "likely_real" | "likely_fake"
+}
 """
 
 
